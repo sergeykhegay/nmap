@@ -52,7 +52,7 @@ Driver = {
   end,
 
   connect = function( self )
-    self.socket = nmap.new_socket()
+    self.socket = brute.new_socket()
     local status, err = self.socket:connect(self.host, self.port)
     self.socket:set_timeout(arg_timeout)
     if(not(status)) then
@@ -68,11 +68,13 @@ Driver = {
 
     status, err = self.socket:send("USER " .. user .. "\r\n")
     if(not(status)) then
+      -- stdnse.debug1("Couldn't send login: (%s, %s), err=%s", user, pass, err)
       return false, brute.Error:new("Couldn't send login: " .. err)
     end
 
     status, err = self.socket:send("PASS " .. pass .. "\r\n")
     if(not(status)) then
+      -- stdnse.debug1("Couldn't send password: (%s, %s), err=%s", user, pass, err)
       return false, brute.Error:new("Couldn't send login: " .. err)
     end
 
@@ -87,7 +89,12 @@ Driver = {
         stdnse.debug1("Successful login: %s/%s", user, pass)
         return true, creds.Account:new( user, pass, creds.State.VALID)
       elseif(string.match(line, "^530")) then
-        return false,  brute.Error:new( "Incorrect password" )
+        return false, brute.Error:new( "Incorrect password" )
+      elseif(string.match(line, "^421")) then
+        local err = brute.Error:new("Too many connections")
+        err:setReduce(true)
+        -- err:setRetry(true)
+        return false, err
       elseif(string.match(line, "^220")) then
       elseif(string.match(line, "^331")) then
       else
@@ -108,8 +115,6 @@ Driver = {
     self.socket:close()
     return true
   end
-
-
 }
 
 action = function( host, port )
@@ -118,8 +123,7 @@ action = function( host, port )
   local engine = brute.Engine:new(Driver, host, port)
   engine.options.script_name = SCRIPT_NAME
 
-
   status, result = engine:start()
-
+  stdnse.debug1("I have finished!")
   return result
 end
