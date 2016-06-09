@@ -9,6 +9,8 @@ description = [[
 Performs brute force password auditing against FTP servers.
 
 Based on old ftp-brute.nse script by Diman Todorov, Vlatko Kosturjak and Ron Bowes.
+
+06.08.16 - Modified by Sergey Khegay to support new brute.lua adaptability mechanism.
 ]]
 
 ---
@@ -65,16 +67,13 @@ Driver = {
     local status, err
     local res = ""
 
-
     status, err = self.socket:send("USER " .. user .. "\r\n")
     if(not(status)) then
-      -- stdnse.debug1("Couldn't send login: (%s, %s), err=%s", user, pass, err)
       return false, brute.Error:new("Couldn't send login: " .. err)
     end
 
     status, err = self.socket:send("PASS " .. pass .. "\r\n")
     if(not(status)) then
-      -- stdnse.debug1("Couldn't send password: (%s, %s), err=%s", user, pass, err)
       return false, brute.Error:new("Couldn't send login: " .. err)
     end
 
@@ -93,7 +92,6 @@ Driver = {
       elseif(string.match(line, "^421")) then
         local err = brute.Error:new("Too many connections")
         err:setReduce(true)
-        -- err:setRetry(true)
         return false, err
       elseif(string.match(line, "^220")) then
       elseif(string.match(line, "^331")) then
@@ -118,12 +116,10 @@ Driver = {
 }
 
 action = function( host, port )
-
   local status, result
   local engine = brute.Engine:new(Driver, host, port)
   engine.options.script_name = SCRIPT_NAME
 
   status, result = engine:start()
-  stdnse.debug1("I have finished!")
   return result
 end
