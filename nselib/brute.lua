@@ -791,8 +791,8 @@ Engine =
       if ( self.threads[data[i]] and coroutine.status( data[i] ) ~= "dead" and
         self.threads[data[i]].in_batch ) then
         if not( self.threads[data[i]].ready ) then
-          stdnse.debug1("FOUND NOT READY = %d", i)
-          stdnse.debug1("THREAD# = %s", tostring(data[i]))
+          -- stdnse.debug1("FOUND NOT READY = %d", i)
+          -- stdnse.debug1("THREAD# = %s", tostring(data[i]))
           return false
         end
       end
