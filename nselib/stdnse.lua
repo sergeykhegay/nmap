@@ -1406,10 +1406,4 @@ function keys(t)
   return ret
 end
 
---- Returns current connection statistics object
--- @return A statistics object. Currently has only field "connection_waiting"
-function get_stats()
-  return nmap.socket.get_stats()
-end
-
 return _ENV;
