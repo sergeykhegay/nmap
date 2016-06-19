@@ -4,7 +4,7 @@
 --
 -- The library currently attempts to parallelize the guessing by starting
 -- a number of working threads. The number of threads can be defined using
--- the brute.threads argument, it defaults to 10.
+-- the brute.threads argument, it defaults to 20.
 --
 -- The library contains the following classes:
 -- * <code>Engine</code>
@@ -160,6 +160,8 @@
 -- @args brute.guesses the number of guesses to perform against each account.
 --       (default: 0 (unlimited)). The argument can be used to prevent account
 --       lockouts.
+-- @args brute.start the number of threads the engine will start with.
+--       (default: 5).
 --
 -- @author Patrik Karlsson <patrik@cqure.net>
 -- @copyright Same as Nmap--See https://nmap.org/book/man-legal.html
@@ -466,7 +468,10 @@ Engine =
     }
     setmetatable(o, self)
     self.__index = self
-    o.max_threads = stdnse.get_script_args("brute.threads") or 20
+
+    o.max_threads = tonumber( stdnse.get_script_args("brute.threads") ) or 20
+    o.start_threads = tonumber( stdnse.get_script_args("brute.start") ) or 5
+
     return o
   end,
 
@@ -895,14 +900,22 @@ Engine =
 
     self.starttime = os.time()
 
-    -- Startup one worker thread for now
-    self:addNewWorker( cvar )
+    -- Startup threads threads
+    local start_threads = self.start_threads
+    if nmap.socket.get_stats().connect_waiting > 0 then
+      start_threads = 1
+    end
+
+    for i = 1, start_threads do 
+      self:addNewWorker( cvar ) 
+    end
+    
+    self:renewBatch()
 
     local killed_one = false
     local error_since_batch_start = false
     local revive = false
-
-    self:renewBatch()
+    local stagnation_count = 0 -- number of times when all threads are stopped because of exception
 
     -- Main logic loop
     while true do
@@ -910,9 +923,11 @@ Engine =
 
       -- should we stop
       if num_threads <= 0 then
-        if self.initial_accounts_exhausted and #self.retry_accounts == 0 then
+        if self.initial_accounts_exhausted and #self.retry_accounts == 0 or
+          self.terminate_all then
           break
         else
+          -- there are some accounts yet to be cheked, so revive the engine
           revive = true
         end
       end
@@ -920,6 +935,9 @@ Engine =
       killed_one = false
       error_since_batch_start = false
 
+      -- are all the threads have any kinfd of mistake?
+      -- if not, then this variable will change to false after the cicle
+      local stagnated = true
 
       -- run through all coroutines and check their statuses
       -- if any mistake has happened kill one coroutine
@@ -938,11 +956,9 @@ Engine =
           end
 
           -- remove error flag of a thread to let the thread continue to run
-          v.error = nil
-        end
+          v.protocol_error = nil
 
-        -- shall we kill a thread because of connection error?
-        if v.connection_error then
+        elseif v.connection_error then -- shall we kill a thread because of connection error?
           if not( killed_one ) then
             stdnse.debug1("Killed one because of CONNECTION exception")
             v.terminate = true
@@ -950,13 +966,25 @@ Engine =
           end
 
           v.connection_error = nil
+        else
+          -- if we got here, then at least one thread is running fine
+          stagnated = false
         end
       end
 
+      if stagnated == true then
+        stagnation_count = stagnation_count + 1
+        if stagnation_count == 100 then
+          self.error = "The service seems to have failed or got heavily firewalled..."
+          self.terminate_all = true
+        end
+      else
+        stagnation_count = 0
+      end
 
       -- check if we possibly exhaust resources
       if not (killed_one) then
-        local waiting = stdnse.get_stats().connect_waiting
+        local waiting = nmap.socket.get_stats().connect_waiting
 
         if waiting ~= 0 then
           for co, v in pairs( self.threads ) do
@@ -992,7 +1020,9 @@ Engine =
       end
 
 
-      stdnse.debug1("Status: #threads = %d, #retry_accounts = %d, initial_accounts_exhausted = %s", self:threadCount(), #self.retry_accounts, tostring(self.initial_accounts_exhausted))
+      stdnse.debug1("Status: #threads = %d, #retry_accounts = %d, initial_accounts_exhausted = %s", 
+        self:threadCount(), #self.retry_accounts, tostring(self.initial_accounts_exhausted)
+      )
 
       -- wake up other threads
       -- wait for all threads to finish running
