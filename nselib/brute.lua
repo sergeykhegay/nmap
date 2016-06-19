@@ -987,12 +987,19 @@ Engine =
         local waiting = nmap.socket.get_stats().connect_waiting
 
         if waiting ~= 0 then
+          local kill_count = 1
+          if waiting > 5 then
+            kill_count = math.max(math.floor(num_threads / 2), 1)
+          end
+
           for co, v in pairs( self.threads ) do
             if coroutine.status(co) ~= "dead" then
               stdnse.debug1("Killed one because of RESOURCE management")
               v.terminate = true
               killed_one = true
-              break
+              
+              kill_count = kill_count - 1
+              if kill_count == 0 then break end
             end
           end
         end
