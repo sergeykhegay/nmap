@@ -462,7 +462,6 @@ Engine =
 
       retry_accounts = {},
       initial_accounts_exhausted = false,
-      batch_full = false,
       batch = nil,
       tick = 0,
     }
@@ -661,7 +660,6 @@ Engine =
         ----stdnse.debug1( "Preadd. Batch size = %d, limit = %d", self.batch:getSize(), self.batch:getLimit() )
         self.batch:add( coroutine.running() )
         ----stdnse.debug1( "Postadd. Batch size = %d, limit = %d", self.batch:getSize(), self.batch:getLimit() )
-        self.batch_full = self.batch:isFull()
         thread_data.in_batch = true
         thread_data.ready = false
       end
@@ -780,7 +778,6 @@ Engine =
       end
     end
 
-    self.batch_full = false
     -- self.batch = Batch:new( math.max( math.floor(self:threadCount() / 3), 1)  )
     self.batch = Batch:new( math.min( self:threadCount(), 3), self.tick  )
   end,
