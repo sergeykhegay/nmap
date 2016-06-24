@@ -744,7 +744,7 @@ Engine =
   --- Adds new worker thread using start function
   --
   -- @return new thread object
-  addNewWorker = function(self, cvar)
+  addWorker = function(self, cvar)
     local co = stdnse.new_thread( self.login, self, cvar )
 
     Engine.THREAD_TO_ENGINE[co] = self
@@ -763,6 +763,13 @@ Engine =
     }
 
     return co
+  end,
+
+  addWorkerN = function(self, cvar, n)
+    assert(n >= 0)
+    for i = 1, n do 
+      self:addWorker(cvar)
+    end
   end,
 
   renewBatch = function(self)
@@ -897,22 +904,24 @@ Engine =
 
     self.starttime = os.time()
 
-    -- Startup threads threads
+
+    -- How many threads should start?
     local start_threads = self.start_threads
+    -- If there are already too many threads waiting for connection,
+    -- then start humbly with one thread
     if nmap.socket.get_stats().connect_waiting > 0 then
       start_threads = 1
     end
-
-    for i = 1, start_threads do 
-      self:addNewWorker( cvar ) 
-    end
     
+    -- Start `start_threads` number of threads
+    self:addWorkerN(cvar, start_threads)
     self:renewBatch()
 
     local killed_one = false
     local error_since_batch_start = false
     local revive = false
     local stagnation_count = 0 -- number of times when all threads are stopped because of exception
+    local quick_start = true
 
     -- Main logic loop
     while true do
@@ -939,14 +948,14 @@ Engine =
       -- run through all coroutines and check their statuses
       -- if any mistake has happened kill one coroutine
       for co, v in pairs( self.threads ) do
-        -- stdnse.debug1("CONSIDERING: %s", tostring(co))
         if v.protocol_error then
+
           -- if an exception occured after we started a new batch.
           if v.attempt >= self.batch:getStartTime() then
             error_since_batch_start = true
           end
 
-          if not ( killed_one ) then
+          if not( killed_one ) then
             stdnse.debug1("Killed one thread because of PROTOCOL exception")
             v.terminate = true
             killed_one = true
@@ -977,6 +986,10 @@ Engine =
         end
       else
         stagnation_count = 0
+      end
+
+      if killed_one then
+        quick_start = false
       end
 
       -- check if we possibly exhaust resources
@@ -1016,7 +1029,15 @@ Engine =
       -- stdnse.debug1("Batch size = %d , limit = %d, ready = %s", self.batch:getSize(), self.batch:getLimit(), tostring(self:readyBatch()))
       if ( not( killed_one ) and self.batch:isFull() and num_threads < self.max_threads ) or
         ( revive ) then
-        self:addNewWorker( cvar )
+
+        local num_to_add = 1
+
+        if quick_start then
+          num_to_add = math.min(self.max_threads - num_threads, num_threads)
+        end
+
+        self:addWorkerN(cvar, num_to_add)
+        
         revive = false
         --stdnse.debug1("Batch size = %d", self.batch:getSize())
         --stdnse.debug1("NOTICE: add new thread. #threads = %d", self:threadCount())
