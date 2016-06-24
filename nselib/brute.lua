@@ -652,22 +652,18 @@ Engine =
         break
       end
 
-
-      -- Add this thread to the batch and update tick
+      -- Updtae tick and add this thread to the batch
       self.tick = self.tick + 1
+
       if ( not( self.batch:isFull() ) and not( thread_data.in_batch ) ) then
-        ----stdnse.debug1( "Preadd. Batch is = %s", tostring( self.batch:isFull() ) )
-        ----stdnse.debug1( "Preadd. Batch size = %d, limit = %d", self.batch:getSize(), self.batch:getLimit() )
         self.batch:add( coroutine.running() )
-        ----stdnse.debug1( "Postadd. Batch size = %d, limit = %d", self.batch:getSize(), self.batch:getLimit() )
+        
         thread_data.in_batch = true
         thread_data.ready = false
       end
 
-      -- stdnse.debug1("THREAD STARTED# = %s", tostring( coroutine.running() ))
       -- We expect doAuthenticate to pass the report variable recieved from the script
       local status, response, ret_creds = self:doAuthenticate()
-      -- stdnse.debug1("THREAD FINISHED# = %s", tostring( coroutine.running() ))
 
       if ( thread_data.in_batch ) then
         thread_data.ready = true
@@ -785,28 +781,27 @@ Engine =
       end
     end
 
-    -- self.batch = Batch:new( math.max( math.floor(self:threadCount() / 3), 1)  )
-    self.batch = Batch:new( math.min( self:threadCount(), 3), self.tick  )
+    self.batch = Batch:new(math.min( self:threadCount(), 3), self.tick)
   end,
 
   readyBatch = function(self)
     if not( self.batch ) then return false end
+
     local n = self.batch:getSize()
     local data = self.batch:getData()
 
     if ( n == 0 ) then return false end
 
     for i = 1, n do
-      if ( self.threads[data[i]] and coroutine.status( data[i] ) ~= "dead" and
+      if ( self.threads[data[i]] and coroutine.status(data[i]) ~= "dead" and
         self.threads[data[i]].in_batch ) then
         if not( self.threads[data[i]].ready ) then
-          -- stdnse.debug1("FOUND NOT READY = %d", i)
-          -- stdnse.debug1("THREAD# = %s", tostring(data[i]))
           return false
         end
       end
     end
 
+    stdnse.debug1("Batch is ready")
     return true
   end,
 
@@ -917,18 +912,19 @@ Engine =
     self:addWorkerN(cvar, start_threads)
     self:renewBatch()
 
+    local revive = false
     local killed_one = false
     local error_since_batch_start = false
-    local revive = false
-    local stagnation_count = 0 -- number of times when all threads are stopped because of exception
+    local stagnation_count = 0 -- number of times when all threads are stopped because of exceptions
     local quick_start = true
+    local stagnated = true
 
     -- Main logic loop
     while true do
-      local num_threads = self:threadCount()
+      local thread_count = self:threadCount()
 
       -- should we stop
-      if num_threads <= 0 then
+      if thread_count <= 0 then
         if self.initial_accounts_exhausted and #self.retry_accounts == 0 or
           self.terminate_all then
           break
@@ -938,48 +934,51 @@ Engine =
         end
       end
 
+      -- Reset flags
       killed_one = false
       error_since_batch_start = false
 
-      -- are all the threads have any kinfd of mistake?
-      -- if not, then this variable will change to false after the cicle
-      local stagnated = true
+      -- Are all the threads have any kinfd of mistake?
+      -- if not, then this variable will change to false after next loop
+      stagnated = true
 
-      -- run through all coroutines and check their statuses
-      -- if any mistake has happened kill one coroutine
+      -- Run through all coroutines and check their statuses
+      -- if any mistake has happened kill one coroutine.
+      -- We do not actually kill a coroutine rightaway, we just 
+      -- signal it to finish work until some point an then die.
       for co, v in pairs( self.threads ) do
-        if v.protocol_error then
-
-          -- if an exception occured after we started a new batch.
+        if v.protocol_error or v.connection_error then
           if v.attempt >= self.batch:getStartTime() then
             error_since_batch_start = true
           end
 
           if not( killed_one ) then
-            stdnse.debug1("Killed one thread because of PROTOCOL exception")
             v.terminate = true
             killed_one = true
+
+            if v.protocol_error then
+              stdnse.debug1("Killed one thread because of PROTOCOL exception")
+            else
+              stdnse.debug1("Killed one thread because of CONNECTION exception")
+            end
           end
 
-          -- remove error flag of a thread to let the thread continue to run
+          -- Remove error flags of the thread to let it continue to run
           v.protocol_error = nil
-
-        elseif v.connection_error then -- shall we kill a thread because of connection error?
-          if not( killed_one ) then
-            stdnse.debug1("Killed one because of CONNECTION exception")
-            v.terminate = true
-            killed_one = true
-          end
-
           v.connection_error = nil
         else
-          -- if we got here, then at least one thread is running fine
+          -- If we got here, then at least one thread is running fine
+          -- and there is no connection stagnation
           stagnated = false
         end
       end
 
       if stagnated == true then
         stagnation_count = stagnation_count + 1
+
+        -- If we get inside `if` below, then we are not making any
+        -- guesses for too long. In this case it is reasonable to stop
+        -- bruteforce.
         if stagnation_count == 100 then
           self.error = "The service seems to have failed or got heavily firewalled..."
           self.terminate_all = true
@@ -988,18 +987,20 @@ Engine =
         stagnation_count = 0
       end
 
+      -- `quick_start` changes to false only once since Engine starts
+      -- `auick_start` remains false till the end of the bruteforce.
       if killed_one then
         quick_start = false
       end
 
-      -- check if we possibly exhaust resources
+      -- Check if we possibly exhaust resources.
       if not (killed_one) then
         local waiting = nmap.socket.get_stats().connect_waiting
 
         if waiting ~= 0 then
           local kill_count = 1
           if waiting > 5 then
-            kill_count = math.max(math.floor(num_threads / 2), 1)
+            kill_count = math.max(math.floor(thread_count / 2), 1)
           end
 
           for co, v in pairs( self.threads ) do
@@ -1016,32 +1017,29 @@ Engine =
 
       end
 
-      -- discard the current batch and start a new one
-      -- Renew batch if there was an error since we started to assemble the batch
+      -- Renew the batch if there was an error since we started to assemble the batch
       -- or the batch's limit is unreachable with current number of threads
       -- or when some thread does not change state to ready for too long
       if error_since_batch_start or
-        not( killed_one ) and num_threads < self.batch:getLimit() or
-        ( num_threads > 0 and self.tick - self.batch:getStartTime() > 10 ) then
+        not( killed_one ) and thread_count < self.batch:getLimit() or
+        ( thread_count > 0 and self.tick - self.batch:getStartTime() > 10 ) then
         self:renewBatch()
       end
 
-      -- stdnse.debug1("Batch size = %d , limit = %d, ready = %s", self.batch:getSize(), self.batch:getLimit(), tostring(self:readyBatch()))
-      if ( not( killed_one ) and self.batch:isFull() and num_threads < self.max_threads ) or
+      stdnse.debug1("Batch size = %d , limit = %d, ready = %s", 
+        self.batch:getSize(), self.batch:getLimit(), tostring(self:readyBatch()) )
+      
+      if ( not( killed_one ) and self.batch:isFull() and thread_count < self.max_threads ) or
         ( revive ) then
 
         local num_to_add = 1
-
         if quick_start then
-          num_to_add = math.min(self.max_threads - num_threads, num_threads)
+          num_to_add = math.min(self.max_threads - thread_count, thread_count)
         end
 
         self:addWorkerN(cvar, num_to_add)
-        
-        revive = false
-        --stdnse.debug1("Batch size = %d", self.batch:getSize())
-        --stdnse.debug1("NOTICE: add new thread. #threads = %d", self:threadCount())
         self:renewBatch()
+        revive = false
       end
 
 
