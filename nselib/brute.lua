@@ -3,8 +3,12 @@
 -- password guessing against remote services.
 --
 -- The library currently attempts to parallelize the guessing by starting
--- a number of working threads. The number of threads can be defined using
--- the brute.threads argument, it defaults to 20.
+-- a number of working threads and increasing that number gradually until
+-- brute.threads limit is reached. The starting number of threads can be set
+-- with brute.start argument, it defaults to 5. The brute.threads argument 
+-- defaults to 20. It is worth noticing that the number of working threads 
+-- will grow exponentially until any error occurs, after that the engine 
+-- will switch to linear growth.
 --
 -- The library contains the following classes:
 -- * <code>Engine</code>
@@ -33,6 +37,10 @@
 -- Engine to retry a set of credentials by calling the Error objects
 -- <code>setRetry</code> method. It may also signal the Engine to abort all
 -- password guessing by calling the Error objects <code>setAbort</code> method.
+-- Finally, the driver can notify the Engine about protocol related exception
+-- (like the ftp code 421 "Too many connections") by calling 
+-- <code>setReduce</code> method. The latter will signal the Engine to reduce
+-- the number of running worker threads.
 --
 -- The following example code demonstrates how the Error object can be used.
 --
@@ -124,6 +132,92 @@
 -- end
 -- </code>
 --
+-- The Engine is written with performance and reasonable resource usage in mind
+-- and requires minimum extra work from a script developer. A trivial approach
+-- is to spawn as many working threads as possible regardless of network 
+-- conditions, other scripts' needs, and protocol response. This indeed works
+-- well, but only in ideal conditions. In reality there might be several
+-- scripts running or only limited number of threads are allowed to use sockets
+-- at any given moment (as it is in Nmap). A more intelligent approach is to 
+-- automate the management of Engine's running threads, so that performance
+-- of other scripts does not suffer because of exhaustive brute force work.
+-- This can be done on three levels: protocol, network, and resource level.
+-- 
+-- On the protocol level the developer should notify the Engine about connection
+-- restrictions imposed by a server that can be learned during a protocol
+-- communication. Like code 421 "To many connections" is used in FTP. Reasonably
+-- in such cases we would like to reduce the number of connections to this
+-- service, hence saving resources for other work and reducing the load on the
+-- target server. This can be done by returning an Error object with called
+-- <code>setReduce</code> method on it. The error will make the Engine reduce
+-- the number of running threads.
+--
+-- Following is an example how it can be done for FTP brute.
+--
+-- <code>
+-- local line = <responce from the server>
+--
+-- if(string.match(line, "^230")) then
+--   stdnse.debug1("Successful login: %s/%s", user, pass)
+--   return true, creds.Account:new( user, pass, creds.State.VALID)
+-- elseif(string.match(line, "^530")) then
+--   return false, brute.Error:new( "Incorrect password" )
+-- elseif(string.match(line, "^421")) then
+--   local err = brute.Error:new("Too many connections")
+--   err:setReduce(true)
+--   return false, err
+-- elseif(string.match(line, "^220")) then
+-- elseif(string.match(line, "^331")) then
+-- else
+--   stdnse.debug1("WARNING: Unhandled response: %s", line)
+--   local err = brute.Error:new("Unhandled response")
+--   err:setRetry(true)
+--   return false, err
+-- end
+-- </code>
+--
+-- On the network level we want to catch errors that can occur because of
+-- network congestion or target machine specifics, say firewalled. These 
+-- errors can be caught as return results of operations on sockets, like 
+-- <code>local status, err = socket.receive()</code>. Asking a developer to
+-- relay such errors to the Engine is counterproductive, and it would lead to
+-- bloated scripts with lots of repetitive code. The Engine takes care of that
+-- with a little help from the developer. The only thing that needs to be 
+-- done is to use <code>brute.new_socket()</code> instead of
+-- <code>nmap.new_socket()</code> when creating a socket in a script.
+--
+-- NOTE: A socket created with <code>brute.new_socket()</code> will behave as
+-- a regular socket when used without the brute library. The returned object
+-- is a BruteSocket instance, which can be treated as a regular socket object.
+--
+-- Example on creating "brute" socket.
+--
+-- <code>
+-- connect = function( self )
+--   self.socket = brute.new_socket()
+--   local status, err = self.socket:connect(self.host, self.port)
+--   self.socket:set_timeout(arg_timeout)
+--   if(not(status)) then
+--     return false, brute.Error:new( "Couldn't connect to host: " .. err )
+--   end
+--   return true
+-- end
+-- </code>
+--
+-- On the resource level the Engine can query the current status of the NSE.
+-- As of the time of writing, the only parameter used is a number of threads 
+-- waiting for connection (as was said before the NSE has a constraint on the 
+-- number of concurrent connections due to performance reasons). With a 
+-- running brute script the limit can be hit pretty fast, which can affect
+-- performance of other scripts. To mitigate this situation resource management
+-- strategy is used, and the Engine will reduce the number of working threads
+-- if there are any threads waiting for connection. As a result the preference
+-- for connection will be given to non brute scripts and if there are many 
+-- brute scripts running simultaneously, then they will not exhaust resources
+-- unnecessarily. 
+-- This feature is enabled by default and does not require any additional work 
+-- from the developer.
+--
 -- For a complete example of a brute implementation consult the
 -- <code>svn-brute.nse</code> or <code>vnc-brute.nse</code> scripts
 --
@@ -189,6 +283,7 @@
 --                             bugfix: added support for guessing the username
 --                             as password per default, as suggested by the
 --                             documentation.
+-- Revised 07/11/2016 - v.8  - 
 
 local coroutine = require "coroutine"
 local creds = require "creds"
