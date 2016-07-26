@@ -788,7 +788,6 @@ Engine =
         end
       elseif ( ret_creds ) then
         -- add credentials to a vault
-        -----stdnse.debug1("NOTICE: Added new pair to vault (%s, %s)", report.creds.username, report.creds.password)
         self.retry_accounts[#self.retry_accounts + 1] = {
           username = ret_creds.username,
           password = ret_creds.password
@@ -1362,6 +1361,10 @@ Iterators = {
 
 }
 
+-- A socket wrapper class.
+-- Instances of this class can be treated as regular sockets.
+-- This wrapper is used to relay connection errors to the corresponding Engine
+-- instance.
 BruteSocket = {
   new = function(self)
     local o = {
@@ -1370,7 +1373,6 @@ BruteSocket = {
     setmetatable(o, self)
 
     self.__index = function(table, key)
-      --stdnse.debug1("__INDEX: key = %s, %s", tostring(key), tostring( coroutine.running() ))
       if self[key] then
         return self[key]
       elseif o.socket[key] then
@@ -1397,8 +1399,6 @@ BruteSocket = {
 
   checkStatus = function(self, status, err)
     if not( status ) and (err == "ERROR" or err == "TIMEOUT") then
-      -- stdnse.debug1("MARKED, %s, %s", tostring(coroutine.running()), tostring(stdnse.base))
-
       local engine = Engine.getEngine( coroutine.running() )
 
       if not( engine ) then
@@ -1413,25 +1413,17 @@ BruteSocket = {
         password = thread_data.password
       }
 
-      -- stdnse.debug1("CONNECTION:Added credentials to retry, (%s,%s)", thread_data.username, thread_data.password)
       thread_data.connection_error = true
       thread_data.con_error_reason = err
     end
   end,
 
   connect = function(self, host, port)
-    --stdnse.debug1("CONNECT: socket = %s, %s", tostring(self.socket), tostring( coroutine.running() ))
     local status, err = self.socket:connect(host, port)
-    -- stdnse.debug1("CONNECT: socket = %s", tostring(self.socket))
-    -- stdnse.debug1("CONNECT: status = %s, err = %s, %s, %s", tostring(status), tostring(err), tostring(self.socket), tostring( coroutine.running() ))
     self:checkStatus(status, err)
 
     return status, err
   end,
-
-  -- set_timeout = function(self, timeout)
-  --   self.socket:set_timeout(timeout)
-  -- end,
 
   send = function(self, data)
     local status, err = self.socket:send(data)
@@ -1450,7 +1442,6 @@ BruteSocket = {
   close = function(self)
     self.socket:close()
   end,
-
 }
 
 new_socket = function()
