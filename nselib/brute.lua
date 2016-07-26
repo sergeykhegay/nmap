@@ -723,13 +723,6 @@ Engine =
     -- Increase the amount of total guesses
     self.counter = self.counter + 1
 
-    -- did we exhaust all retries, terminate and report?
-    -- if ( retries == 0 ) then
-    --   -- Engine.terminate_all = true
-    --   self.protocol_error = "Too many retries, aborted ..."
-    --   response = Error:new("Too many retries, aborted ...")
-    --   response.abort = true
-    -- end
     return status, response
   end,
 
