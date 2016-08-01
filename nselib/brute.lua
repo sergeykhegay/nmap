@@ -1180,8 +1180,8 @@ Engine = {
       end
 
 
-      stdnse.debug2("Status: #threads = %d, #retry_accounts = %d, initial_accounts_exhausted = %s", s
-        elf:threadCount(), #self.retry_accounts, tostring(self.initial_accounts_exhausted))
+      stdnse.debug2("Status: #threads = %d, #retry_accounts = %d, initial_accounts_exhausted = %s",
+        self:threadCount(), #self.retry_accounts, tostring(self.initial_accounts_exhausted))
 
       -- wake up other threads
       -- wait for all threads to finish running
