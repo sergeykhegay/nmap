@@ -1085,6 +1085,9 @@ Engine = {
       -- We do not actually kill a coroutine right-away, we just
       -- signal it to finish work until some point an then die.
       for co, v in pairs(self.threads) do
+        if not c.connection_error then
+          stagnated = false
+        end
         if v.protocol_error or v.connection_error then
           if v.attempt >= self.batch:getStartTime() then
             error_since_batch_start = true
@@ -1107,7 +1110,7 @@ Engine = {
         else
           -- If we got here, then at least one thread is running fine
           -- and there is no connection stagnation
-          stagnated = false
+          --stagnated = false
         end
       end
 
