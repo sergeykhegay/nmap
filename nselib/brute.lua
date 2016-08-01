@@ -283,7 +283,8 @@
 --                             bugfix: added support for guessing the username
 --                             as password per default, as suggested by the
 --                             documentation.
--- Revised 07/11/2016 - v.8  -
+-- Revised 07/11/2016 - v.8  - added smart resource management and error handling
+--                             mechanisms. Sergey Khegay <g.sergeykhegay@gmail.com>
 
 local coroutine = require "coroutine"
 local creds = require "creds"
@@ -710,12 +711,12 @@ Engine = {
               self.initial_accounts_exhausted = true
               return false
             end
-          until (not self.found_accounts or not self.found_accounts[username]) 
-            and (self.options.max_guesses == 0 or not self.account_guesses[username] 
+          until (not self.found_accounts or not self.found_accounts[username])
+            and (self.options.max_guesses == 0 or not self.account_guesses[username]
                   or self.options.max_guesses > self.account_guesses[username])
 
           -- increases the number of guesses for an account
-          self.account_guesses[username] = self.account_guesses[username] 
+          self.account_guesses[username] = self.account_guesses[username]
                                            and self.account_guesses[username] + 1 or 1
         end
 
@@ -773,7 +774,7 @@ Engine = {
 
     while true do
       -- Should we terminate all threads or this particular thread?
-      if (self.terminate_all or thread_data.terminate) 
+      if (self.terminate_all or thread_data.terminate)
         or (self.initial_accounts_exhausted and #self.retry_accounts == 0) then
         break
       end
@@ -788,7 +789,7 @@ Engine = {
         thread_data.ready = false
       end
 
-      -- We expect doAuthenticate to pass the report variable recieved from the script
+      -- We expect doAuthenticate to pass the report variable received from the script
       local status, response, ret_creds = self:doAuthenticate()
 
       if thread_data.in_batch then
@@ -934,7 +935,6 @@ Engine = {
       end
     end
 
-    stdnse.debug1 "Batch is ready"
     return true
   end,
 
@@ -1020,7 +1020,7 @@ Engine = {
       -- if we're only guessing passwords, this doesn't make sense
       if not self.options.passonly then
         self.iterator = unpwdb.concat_iterators(
-          Iterators.pw_same_as_user_iterator(usernames, "lower"), 
+          Iterators.pw_same_as_user_iterator(usernames, "lower"),
           self.iterator
         )
       end
@@ -1067,7 +1067,7 @@ Engine = {
         if self.initial_accounts_exhausted and #self.retry_accounts == 0 or self.terminate_all then
           break
         else
-          -- there are some accounts yet to be cheked, so revive the engine
+          -- there are some accounts yet to be checked, so revive the engine
           revive = true
         end
       end
@@ -1076,13 +1076,13 @@ Engine = {
       killed_one = false
       error_since_batch_start = false
 
-      -- Are all the threads have any kinfd of mistake?
+      -- Are all the threads have any kind of mistake?
       -- if not, then this variable will change to false after next loop
       stagnated = true
 
       -- Run through all coroutines and check their statuses
       -- if any mistake has happened kill one coroutine.
-      -- We do not actually kill a coroutine rightaway, we just
+      -- We do not actually kill a coroutine right-away, we just
       -- signal it to finish work until some point an then die.
       for co, v in pairs(self.threads) do
         if v.protocol_error or v.connection_error then
@@ -1095,9 +1095,9 @@ Engine = {
             killed_one = true
 
             if v.protocol_error then
-              stdnse.debug1 "Killed one thread because of PROTOCOL exception"
+              stdnse.debug2("Killed one thread because of PROTOCOL exception")
             else
-              stdnse.debug1 "Killed one thread because of CONNECTION exception"
+              stdnse.debug2("Killed one thread because of CONNECTION exception")
             end
           end
 
@@ -1143,7 +1143,7 @@ Engine = {
 
           for co, v in pairs(self.threads) do
             if coroutine.status(co) ~= "dead" then
-              stdnse.debug1 "Killed one because of RESOURCE management"
+              stdnse.debug2("Killed one because of RESOURCE management")
               v.terminate = true
               killed_one = true
 
@@ -1160,13 +1160,14 @@ Engine = {
       -- Renew the batch if there was an error since we started to assemble the batch
       -- or the batch's limit is unreachable with current number of threads
       -- or when some thread does not change state to ready for too long
-      if error_since_batch_start or not killed_one and thread_count < self.batch:getLimit() or (thread_count > 0 and self.tick - self.batch:getStartTime() > 10) then
+      if error_since_batch_start
+        or not killed_one and thread_count < self.batch:getLimit()
+        or (thread_count > 0 and self.tick - self.batch:getStartTime() > 10) then
         self:renewBatch()
       end
 
-      stdnse.debug1("Batch size = %d , limit = %d, ready = %s", self.batch:getSize(), self.batch:getLimit(), tostring(self:readyBatch()))
-
-      if (not killed_one and self.batch:isFull() and thread_count < self.max_threads) or revive then
+      if (not killed_one and self.batch:isFull() and thread_count < self.max_threads)
+        or revive then
 
         local num_to_add = 1
         if quick_start then
@@ -1179,7 +1180,8 @@ Engine = {
       end
 
 
-      stdnse.debug1("Status: #threads = %d, #retry_accounts = %d, initial_accounts_exhausted = %s", self:threadCount(), #self.retry_accounts, tostring(self.initial_accounts_exhausted))
+      stdnse.debug2("Status: #threads = %d, #retry_accounts = %d, initial_accounts_exhausted = %s", s
+        elf:threadCount(), #self.retry_accounts, tostring(self.initial_accounts_exhausted))
 
       -- wake up other threads
       -- wait for all threads to finish running
@@ -1462,7 +1464,7 @@ BruteSocket = {
       local engine = Engine.getEngine(coroutine.running())
 
       if not engine then
-        stdnse.debug1("WARNING: No assosiated engine detected for %s", coroutine.running())
+        stdnse.debug2("WARNING: No associated engine detected for %s", coroutine.running())
         return -- behave like a usual socket
       end
 
