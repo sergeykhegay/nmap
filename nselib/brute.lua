@@ -1137,6 +1137,7 @@ Engine = {
             self.error = "The service seems to have failed or is heavily firewalled..."
             self.terminate_all = true
           end
+          stagnation_count = 0
         end
       else
         stagnation_count = 0
