@@ -218,6 +218,13 @@
 -- This feature is enabled by default and does not require any additional work
 -- from the developer.
 --
+-- Stagnation avoidance mechanism is implemented to alert users about services
+-- that might have failed during bruteforcing. A warning triggers if all working
+-- threads have been experiencing connection errors during 100 consequentive
+-- iterations of the main thread loop. If <code>brute.killstagnated</code>
+-- is set to <code>true</code> the Engine will abort after the first stagnation
+-- warning.
+--
 -- For a complete example of a brute implementation consult the
 -- <code>svn-brute.nse</code> or <code>vnc-brute.nse</code> scripts
 --
@@ -298,25 +305,27 @@ _ENV = stdnse.module("brute", stdnse.seeall)
 
 -- Engine options that can be set by scripts
 -- Supported options are:
---   * firstonly   - stop after finding the first correct password
---                   (can be set using script-arg brute.firstonly)
---   * passonly    - guess passwords only, don't supply a username
---                   (can be set using script-arg brute.passonly)
---   * max_retries - the amount of retries to do before aborting
---                   (can be set using script-arg brute.retries)
---   * delay       - sets the delay between attempts
---                   (can be set using script-arg brute.delay)
---   * mode        - can be set to either cred, user or pass and controls
---                   whether the engine should iterate over users, passwords
---                   or fetch a list of credentials from a single file.
---                   (can be set using script-arg brute.mode)
---   * title       - changes the title of the result table where the
---                   passwords are returned.
---   * nostore     - don't store the results in the credential library
---   * max_guesses - the maximum amount of guesses to perform for each
---                   account.
---   * useraspass  - guesses the username as password (default: true)
---   * emptypass   - guesses an empty string as password (default: false)
+--   * firstonly     - stop after finding the first correct password
+--                     (can be set using script-arg brute.firstonly)
+--   * passonly      - guess passwords only, don't supply a username
+--                     (can be set using script-arg brute.passonly)
+--   * max_retries   - the amount of retries to do before aborting
+--                     (can be set using script-arg brute.retries)
+--   * delay         - sets the delay between attempts
+--                     (can be set using script-arg brute.delay)
+--   * mode          - can be set to either cred, user or pass and controls
+--                     whether the engine should iterate over users, passwords
+--                     or fetch a list of credentials from a single file.
+--                     (can be set using script-arg brute.mode)
+--   * title         - changes the title of the result table where the
+--                     passwords are returned.
+--   * nostore       - don't store the results in the credential library
+--   * max_guesses   - the maximum amount of guesses to perform for each
+--                     account.
+--   * useraspass    - guesses the username as password (default: true)
+--   * emptypass     - guesses an empty string as password (default: false)
+--   * killstagnated - abort the Engine if bruteforcing has stagnated
+--                     getting too many connections errors. (default: false)
 --
 Options = {
 
@@ -329,6 +338,7 @@ Options = {
     o.useraspass = self.checkBoolArg("brute.useraspass", true)
     o.firstonly = self.checkBoolArg("brute.firstonly", false)
     o.passonly = self.checkBoolArg("brute.passonly", false)
+    o.killstagnated = self.checkBoolArg("brute.killstagnated", false)
     o.max_retries = tonumber(nmap.registry.args["brute.retries"]) or 3
     o.delay = tonumber(nmap.registry.args["brute.delay"]) or 0
     o.max_guesses = tonumber(nmap.registry.args["brute.guesses"]) or 0
@@ -1122,8 +1132,11 @@ Engine = {
         -- guesses for too long. In this case it is reasonable to stop
         -- bruteforce.
         if stagnation_count == 100 then
-          self.error = "The service seems to have failed or got heavily firewalled..."
-          self.terminate_all = true
+          stdnse.debug1("WARNING: The service seems to have failed or is heavily firewalled... Consider aborting.")
+          if self.options.killstagnated then
+            self.error = "The service seems to have failed or is heavily firewalled..."
+            self.terminate_all = true
+          end
         end
       else
         stagnation_count = 0
