@@ -1088,6 +1088,7 @@ Engine = {
         if not c.connection_error then
           stagnated = false
         end
+        
         if v.protocol_error or v.connection_error then
           if v.attempt >= self.batch:getStartTime() then
             error_since_batch_start = true
@@ -1183,8 +1184,9 @@ Engine = {
       end
 
 
-      stdnse.debug2("Status: #threads = %d, #retry_accounts = %d, initial_accounts_exhausted = %s",
-        self:threadCount(), #self.retry_accounts, tostring(self.initial_accounts_exhausted))
+      stdnse.debug2("Status: #threads = %d, #retry_accounts = %d, initial_accounts_exhausted = %s, waiting = %d",
+        self:threadCount(), #self.retry_accounts, tostring(self.initial_accounts_exhausted), 
+        nmap.socket.get_stats().connect_waiting)
 
       -- wake up other threads
       -- wait for all threads to finish running
