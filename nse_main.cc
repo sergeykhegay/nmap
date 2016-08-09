@@ -673,28 +673,23 @@ int nse_yield (lua_State *L, lua_KContext ctx, lua_KFunction k)
   return lua_yieldk(L, 1, ctx, k); /* yield with NSE_YIELD_VALUE */
 }
 
-/* void nse_restore (lua_State *L, int number)             [-, -, e]
+/* void nse_restore (lua_State *L, lua_State *Lthread, int number) [-number, +0, e]
  *
- * Restore the thread 'L' back into the running NSE queue. 'number' is the
- * number of values on the stack to be passed when the thread is resumed. This
- * function may cause a panic due to extraordinary and unavoidable
+ * Restore the thread 'Lthread' back into the running NSE queue. 'number' is
+ * the number of values on the stack to be passed when the thread is resumed.
+ * This function may cause a panic due to extraordinary and unavoidable
  * circumstances.
  */
-void nse_restore (lua_State *L, int number)
+void nse_restore (lua_State *L, lua_State *Lthread, int number)
 {
-  int top = lua_gettop(L);
-  if (!lua_checkstack(L, 5)) abort();
-  lua_State *restorer = lua_newthread(L);
-  lua_insert(L, -(number+1)); /* move below args, anchor on stack */
-  lua_getfield(restorer, LUA_REGISTRYINDEX, NSE_WAITING_TO_RUNNING);
-  lua_pushthread(L);
-  lua_xmove(L, restorer, 1);
-  lua_xmove(L, restorer, number);
-  assert(lua_gettop(restorer) == number+2);
-  if (lua_pcall(restorer, number+1, 0, 0) != 0)
-    fatal("%s: WAITING_TO_RUNNING error!\n%s", __func__, lua_tostring(L, -1));
-  lua_pop(L, 1);
-  assert(lua_gettop(L) == top-number);
+  assert(lua_status(L) == LUA_OK);
+  assert(lua_status(Lthread) == LUA_YIELD);
+  lua_getfield(L, LUA_REGISTRYINDEX, NSE_WAITING_TO_RUNNING);
+  lua_insert(L, -(number+1)); /* move below args */
+  lua_pushthread(Lthread);
+  lua_xmove(Lthread, L, 1);
+  lua_insert(L, -(number+1)); /* move below args */
+  lua_call(L, number+1, 0);
 }
 
 /* void nse_destructor (lua_State *L, char what)           [-(1|2), +0, e]

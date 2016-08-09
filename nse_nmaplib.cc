@@ -303,7 +303,7 @@ static int aux_mutex (lua_State *L)
         luaL_checkstack(thread, 2, "adding destructor");
         lua_xmove(L, thread, 2);
         nse_destructor(thread, 'a');
-        nse_restore(thread, 0);
+        nse_restore(L, thread, 0);
       }
       return 0;
     case TRYLOCK:
@@ -390,7 +390,7 @@ static int aux_condvar (lua_State *L)
   {
     lua_rawgeti(L, -1, i); /* get the thread */
     if (lua_isthread(L, -1))
-      nse_restore(lua_tothread(L, -1), 0);
+      nse_restore(L, lua_tothread(L, -1), 0);
     lua_pop(L, 1); /* pop the thread */
     lua_pushnil(L);
     lua_rawseti(L, -2, i);

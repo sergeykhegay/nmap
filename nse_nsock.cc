@@ -106,6 +106,7 @@ static nsock_pool get_pool (lua_State *L)
   nspp = (nsock_pool *) lua_touserdata(L, NSOCK_POOL);
   assert(nspp != NULL);
   assert(*nspp != NULL);
+  nsock_pool_set_udata(*nspp, L); /* save the current thread for callbacks */
   return *nspp;
 }
 
@@ -239,7 +240,7 @@ static void socket_unlock (lua_State *L)
 
       for (lua_pushnil(L); lua_next(L, CONNECT_WAITING); lua_pop(L, 1))
       {
-        nse_restore(lua_tothread(L, -2), 0);
+        nse_restore(L, lua_tothread(L, -2), 0);
         lua_pushvalue(L, -2);
         lua_pushnil(L);
         lua_rawset(L, CONNECT_WAITING);
@@ -360,10 +361,13 @@ static void prepcb (nse_nsock_udata *nu, lua_State *L, const char *action, const
 
 static void callback (nsock_pool nsp, nsock_event nse, void *ud)
 {
+  lua_State *L = (lua_State *)nsock_pool_get_udata(nsp);
+  assert(L);
+  assert(lua_status(L) == LUA_OK);
   nse_nsock_udata *nu = (nse_nsock_udata *) ud;
+  lua_State *Lthread = nu->thread;
   trace(nse_iod(nse), nu->action, nu->direction);
-  lua_State *L = nu->thread;
-  switch (lua_status(L)) {
+  switch (lua_status(Lthread)) {
     case LUA_OK:
       // Sometimes Nsock fails immediately and callback is called before
       // l_connect has a chance to yield.
@@ -372,7 +376,7 @@ static void callback (nsock_pool nsp, nsock_event nse, void *ud)
     case LUA_YIELD:
       assert(nse_id(nse) == nu->nseid);
       nu->nseid = 0;
-      nse_restore(L, status(L, nse_status(nse)));
+      nse_restore(L, Lthread, status(L, nse_status(nse)));
       break;
     default:
       assert(0);
@@ -608,23 +612,25 @@ static int l_sendto (lua_State *L)
 
 static void receive_callback (nsock_pool nsp, nsock_event nse, void *udata)
 {
+  lua_State *L = (lua_State *)nsock_pool_get_udata(nsp);
+  assert(L);
+  assert(lua_status(L) == LUA_OK);
   nse_nsock_udata *nu = (nse_nsock_udata *) udata;
+  lua_State *Lthread = nu->thread;
+  assert(lua_status(Lthread) == LUA_YIELD);
   assert(nse_id(nse) == nu->nseid);
   nu->nseid = 0;
   nu->status = NSE_STATUS_NONE;
-  lua_State *L = nu->thread;
-  assert(lua_status(L) == LUA_YIELD);
-  if (nse_status(nse) == NSE_STATUS_SUCCESS)
-  {
+  if (nse_status(nse) == NSE_STATUS_SUCCESS) {
     int len;
     const char *str = nse_readbuf(nse, &len);
     trace(nse_iod(nse), hexify((const unsigned char *) str, len).c_str(), FROM);
     lua_pushboolean(L, true);
     lua_pushlstring(L, str, len);
-    nse_restore(L, 2);
+    nse_restore(L, Lthread, 2);
+  } else {
+    nse_restore(L, Lthread, status(L, nse_status(nse))); /* will also restore the thread */
   }
-  else
-    nse_restore(L, status(L, nse_status(nse))); /* will also restore the thread */
 }
 
 static int l_receive (lua_State *L)
@@ -779,10 +785,13 @@ static int sleep_destructor (lua_State *L)
 
 static void sleep_callback (nsock_pool nsp, nsock_event nse, void *ud)
 {
-  lua_State *L = (lua_State *) ud;
-  assert(lua_status(L) == LUA_YIELD);
+  lua_State *L = (lua_State *)nsock_pool_get_udata(nsp);
+  assert(L);
+  assert(lua_status(L) == LUA_OK);
+  lua_State *Lthread = (lua_State *)ud;
+  assert(lua_status(Lthread) == LUA_YIELD);
   assert(nse_status(nse) == NSE_STATUS_SUCCESS);
-  nse_restore(L, 0);
+  nse_restore(L, Lthread, 0);
 }
 
 static int l_sleep (lua_State *L)
@@ -1050,14 +1059,17 @@ static int l_pcap_open (lua_State *L)
 
 static void pcap_receive_handler (nsock_pool nsp, nsock_event nse, void *ud)
 {
-  nse_nsock_udata *nu = (nse_nsock_udata *) ud;
+  lua_State *L = (lua_State *)nsock_pool_get_udata(nsp);
+  assert(L);
+  assert(lua_status(L) == LUA_OK);
 
+  nse_nsock_udata *nu = (nse_nsock_udata *) ud;
   assert(nse_id(nse) == nu->nseid);
   nu->nseid = 0;
   nu->status = NSE_STATUS_NONE;
 
-  lua_State *L = nu->thread;
-  assert(lua_status(L) == LUA_YIELD);
+  lua_State *Lthread = nu->thread;
+  assert(lua_status(Lthread) == LUA_YIELD);
   if (nse_status(nse) == NSE_STATUS_SUCCESS)
   {
     const unsigned char *l2_data, *l3_data;
@@ -1071,10 +1083,10 @@ static void pcap_receive_handler (nsock_pool nsp, nsock_event nse, void *ud)
     lua_pushlstring(L, (const char *) l2_data, l2_len);
     lua_pushlstring(L, (const char *) l3_data, l3_len);
     lua_pushnumber(L, TIMEVAL_SECS(tv));
-    nse_restore(L, 5);
+    nse_restore(L, Lthread, 5);
   }
   else
-    nse_restore(L, status(L, nse_status(nse)));
+    nse_restore(L, Lthread, status(L, nse_status(nse)));
 }
 
 static int l_pcap_receive (lua_State *L)
