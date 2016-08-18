@@ -839,7 +839,7 @@ int send_tcp_raw_decoys(int sd, const struct eth_nfo *eth,
 
   for (decoy = 0; decoy < o.numdecoys; decoy++)
     if (send_tcp_raw(sd, eth,
-                     &o.decoys[decoy], victim,
+                     &((struct sockaddr_in *)&o.decoys[decoy])->sin_addr, victim,
                      ttl, df,
                      ipopt, ipoptlen,
                      sport, dport,
@@ -956,7 +956,7 @@ int send_udp_raw_decoys(int sd, const struct eth_nfo *eth,
   int decoy;
 
   for (decoy = 0; decoy < o.numdecoys; decoy++)
-    if (send_udp_raw(sd, eth, &o.decoys[decoy], victim,
+    if (send_udp_raw(sd, eth, &((struct sockaddr_in *)&o.decoys[decoy])->sin_addr, victim,
                      ttl, ipid, ipops, ipoptlen,
                      sport, dport, data, datalen) == -1)
       return -1;
@@ -1269,7 +1269,7 @@ int readtcppacket(const u8 *packet, int readdata) {
         log_write(LOG_PLAIN, "URG ");
       log_write(LOG_PLAIN, "\n");
 
-      log_write(LOG_PLAIN, "ipid: %hu ttl: %hu ", ntohs(ip->ip_id),
+      log_write(LOG_PLAIN, "ipid: %hu ttl: %hhu ", ntohs(ip->ip_id),
                 ip->ip_ttl);
 
       if (tcp->th_flags & (TH_SYN | TH_ACK))
@@ -1329,7 +1329,7 @@ int readudppacket(const u8 *packet, int readdata) {
                 sourcehost, ntohs(udp->uh_sport), inet_ntoa(bullshit2),
                 ntohs(udp->uh_dport), tot_len);
 
-      log_write(LOG_PLAIN, "ttl: %hu ", ip->ip_ttl);
+      log_write(LOG_PLAIN, "ttl: %hhu ", ip->ip_ttl);
     }
   }
   if (readdata && i < tot_len) {
