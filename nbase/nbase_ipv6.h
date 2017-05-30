@@ -174,11 +174,11 @@ int inet_pton(int af, const char *src, void *dst);
 #ifndef HAVE_INET_NTOP
 /* char *
  * inet_ntop(af, src, dst, size)
- *	convert a network format address to presentation format.
+ *  convert a network format address to presentation format.
  * return:
- *	pointer to presentation format address (`dst'), or NULL (see errno).
+ *  pointer to presentation format address (`dst'), or NULL (see errno).
  * author:
- *	Paul Vixie, 1996.
+ *  Paul Vixie, 1996.
  */
 const char *inet_ntop(int af, const void *src, char *dst, size_t size);
 #endif /* HAVE_INET_NTOP */
